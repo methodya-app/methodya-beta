@@ -1,0 +1,16 @@
+{
+  "name": "methodya-beta-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Backend serverless (Vercel Functions) de METHODYA Beta",
+  "scripts": {
+    "build": "echo 'Proyecto sin paso de build: solo funciones serverless en /api'",
+    "dev": "node --watch dev-server.js",
+    "seed:local": "node scripts/seed-local.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "mongodb": "^6.9.0"
+  }
+}

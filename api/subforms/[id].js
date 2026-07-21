@@ -1,0 +1,46 @@
+import { withCors, ApiError } from '../_lib/cors.js';
+import { requireAuth, requireAdmin } from '../_lib/auth.js';
+import { getDb, toObjectId } from '../_lib/mongo.js';
+import { findFieldsMissingCustomMessage } from '../_lib/validation.js';
+
+export default withCors(async (req, res) => {
+  const auth = await requireAuth(req);
+  const db = await getDb();
+  const oid = toObjectId(req.query.id);
+  if (!oid) throw new ApiError(400, 'id inválido');
+
+  if (req.method === 'GET') {
+    const subform = await db.collection('subforms').findOne({ _id: oid });
+    if (!subform) throw new ApiError(404, 'Subformulario no encontrado');
+    return res.status(200).json({ subform });
+  }
+
+  if (req.method === 'PUT') {
+    requireAdmin(auth);
+    const { nombre, descripcion, fields } = req.body || {};
+    const updates = {};
+    if (nombre !== undefined) updates.nombre = nombre;
+    if (descripcion !== undefined) updates.descripcion = descripcion;
+    if (fields !== undefined) {
+      const missing = findFieldsMissingCustomMessage(fields);
+      if (missing.length > 0) {
+        throw new ApiError(
+          422,
+          `Falta el mensaje de error personalizado en: ${missing.map((f) => f.label).join(', ')}`
+        );
+      }
+      updates.fields = fields;
+    }
+    await db.collection('subforms').updateOne({ _id: oid }, { $set: updates });
+    const subform = await db.collection('subforms').findOne({ _id: oid });
+    return res.status(200).json({ subform });
+  }
+
+  if (req.method === 'DELETE') {
+    requireAdmin(auth);
+    await db.collection('subforms').deleteOne({ _id: oid });
+    return res.status(200).json({ ok: true });
+  }
+
+  throw new ApiError(405, 'Método no permitido');
+});
