@@ -75,6 +75,7 @@ Biblioteca de párrafos predefinidos, filtrable por tags.
 ```json
 {
   "_id": ObjectId,
+  "titulo": "Contexto comunidades andinas",
   "texto": "En muchas comunidades andinas...",
   "tags": ["cultura", "andino", "economia"],
   "created_by": "uuid",

@@ -10,8 +10,9 @@ export default withCors(async (req, res) => {
   if (!oid) throw new ApiError(400, 'id inválido');
 
   if (req.method === 'PUT') {
-    const { texto, tags } = req.body || {};
+    const { titulo, texto, tags } = req.body || {};
     const updates = {};
+    if (titulo !== undefined) updates.titulo = titulo;
     if (texto !== undefined) updates.texto = texto;
     if (tags !== undefined) updates.tags = tags;
     await db.collection('paragraphs').updateOne({ _id: oid }, { $set: updates });

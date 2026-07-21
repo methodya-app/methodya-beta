@@ -20,9 +20,11 @@ export default withCors(async (req, res) => {
 
   if (req.method === 'POST') {
     requireAdmin(auth);
-    const { texto, tags } = req.body || {};
+    const { titulo, texto, tags } = req.body || {};
+    if (!titulo) throw new ApiError(400, 'titulo es obligatorio');
     if (!texto) throw new ApiError(400, 'texto es obligatorio');
     const doc = {
+      titulo,
       texto,
       tags: Array.isArray(tags) ? tags : [],
       created_by: auth.profile.id,

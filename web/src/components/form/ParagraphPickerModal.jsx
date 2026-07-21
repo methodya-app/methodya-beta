@@ -13,7 +13,10 @@ export default function ParagraphPickerModal({ open, onClose, paragraphs, allowe
     }
     if (activeTag) list = list.filter((p) => p.tags?.includes(activeTag));
     if (search.trim()) {
-      list = list.filter((p) => p.texto.toLowerCase().includes(search.toLowerCase()));
+      const q = search.toLowerCase();
+      list = list.filter(
+        (p) => p.titulo?.toLowerCase().includes(q) || p.texto.toLowerCase().includes(q)
+      );
     }
     return list;
   }, [paragraphs, allowedTags, activeTag, search]);
@@ -36,7 +39,7 @@ export default function ParagraphPickerModal({ open, onClose, paragraphs, allowe
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por texto..."
+            placeholder="Buscar por título o texto..."
             className="w-full border border-deepViolet/20 rounded-lg p-2 text-sm"
           />
           {availableTags.length > 0 && (
@@ -72,6 +75,7 @@ export default function ParagraphPickerModal({ open, onClose, paragraphs, allowe
               }}
               className="w-full text-left p-3 rounded-lg border border-deepViolet/10 hover:border-cognitiveTeal hover:bg-cognitiveTeal-light/40 transition"
             >
+              <p className="text-sm font-semibold text-deepViolet">{p.titulo || '(Sin título)'}</p>
               <p className="text-sm text-slate-700 line-clamp-3">{p.texto}</p>
               <div className="flex gap-1 mt-1">
                 {p.tags?.map((t) => (
