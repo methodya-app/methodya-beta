@@ -1,7 +1,7 @@
 import { withCors, ApiError } from '../_lib/cors.js';
 import { requireAuth, requireAdmin, roleInProject } from '../_lib/auth.js';
 import { getDb, toObjectId } from '../_lib/mongo.js';
-import { findFieldsMissingCustomMessage } from '../_lib/validation.js';
+import { findFieldsMissingCustomMessage, findDuplicateVariables } from '../_lib/validation.js';
 
 export default withCors(async (req, res) => {
   const auth = await requireAuth(req);
@@ -24,12 +24,17 @@ export default withCors(async (req, res) => {
     if (descripcion !== undefined) updates.descripcion = descripcion;
     if (document_type_id !== undefined) updates.document_type_id = document_type_id;
     if (sections !== undefined) {
-      const missing = findFieldsMissingCustomMessage(sections.flatMap((s) => s.fields || []));
+      const allFields = sections.flatMap((s) => s.fields || []);
+      const missing = findFieldsMissingCustomMessage(allFields);
       if (missing.length > 0) {
         throw new ApiError(
           422,
           `Falta el mensaje de error personalizado en: ${missing.map((f) => f.label).join(', ')}`
         );
+      }
+      const duplicates = findDuplicateVariables(allFields);
+      if (duplicates.length > 0) {
+        throw new ApiError(422, `Hay variables repetidas en el formulario: ${duplicates.join(', ')}`);
       }
       updates.sections = sections;
     }

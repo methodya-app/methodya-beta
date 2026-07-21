@@ -1,7 +1,7 @@
 import { withCors, ApiError } from '../_lib/cors.js';
 import { requireAuth, requireAdmin } from '../_lib/auth.js';
 import { getDb, toObjectId } from '../_lib/mongo.js';
-import { findFieldsMissingCustomMessage } from '../_lib/validation.js';
+import { findFieldsMissingCustomMessage, findDuplicateVariables } from '../_lib/validation.js';
 
 export default withCors(async (req, res) => {
   const auth = await requireAuth(req);
@@ -28,6 +28,10 @@ export default withCors(async (req, res) => {
           422,
           `Falta el mensaje de error personalizado en: ${missing.map((f) => f.label).join(', ')}`
         );
+      }
+      const duplicates = findDuplicateVariables(fields);
+      if (duplicates.length > 0) {
+        throw new ApiError(422, `Hay variables repetidas en el subformulario: ${duplicates.join(', ')}`);
       }
       updates.fields = fields;
     }

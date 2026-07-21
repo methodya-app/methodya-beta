@@ -101,6 +101,13 @@ export default function FormBuilder() {
 
   if (!form) return <p className="text-slate-500">Cargando formulario...</p>;
 
+  const variableCounts = form.sections
+    .flatMap((s) => s.fields)
+    .reduce((acc, f) => {
+      if (f.variable) acc[f.variable] = (acc[f.variable] || 0) + 1;
+      return acc;
+    }, {});
+
   return (
     <div className="max-w-4xl mx-auto space-y-5 pb-16">
       <div className="flex items-center justify-between">
@@ -153,6 +160,7 @@ export default function FormBuilder() {
                 key={field.id}
                 field={field}
                 subformsLibrary={subformsLibrary}
+                duplicateVariable={variableCounts[field.variable] > 1}
                 onUpdate={(updated) => updateField(section.id, field.id, updated)}
                 onRemove={() => removeField(section.id, field.id)}
               />

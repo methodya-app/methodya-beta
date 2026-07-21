@@ -11,7 +11,7 @@ const FIELD_TYPES = [
   { value: 'subform', label: 'Sub-formulario' },
 ];
 
-export default function FieldEditor({ field, onUpdate, onRemove, subformsLibrary = [] }) {
+export default function FieldEditor({ field, onUpdate, onRemove, subformsLibrary = [], duplicateVariable = false }) {
   const [aiRule, setAiRule] = useState(field.validation?.description || '');
   const [generating, setGenerating] = useState(false);
   const [optionsText, setOptionsText] = useState((field.options || []).join('\n'));
@@ -60,10 +60,17 @@ export default function FieldEditor({ field, onUpdate, onRemove, subformsLibrary
               )
             </label>
             <input
-              className="w-full border border-deepViolet/20 rounded-md p-1.5 text-sm font-mono"
+              className={`w-full border rounded-md p-1.5 text-sm font-mono ${
+                duplicateVariable ? 'border-red-400' : 'border-deepViolet/20'
+              }`}
               value={field.variable}
               onChange={(e) => patch({ variable: e.target.value.replace(/\s+/g, '_') })}
             />
+            {duplicateVariable && (
+              <p className="text-xs text-red-500 mt-0.5">
+                Esta variable ya se usa en otro campo del formulario.
+              </p>
+            )}
           </div>
         </div>
         <button onClick={onRemove} className="text-red-500 text-xs font-semibold mt-5 hover:underline">

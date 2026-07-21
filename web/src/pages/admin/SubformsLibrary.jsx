@@ -63,6 +63,11 @@ export default function SubformsLibrary() {
     load();
   };
 
+  const variableCounts = (selected?.fields || []).reduce((acc, f) => {
+    if (f.variable) acc[f.variable] = (acc[f.variable] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-5">
       <div className="md:col-span-1 space-y-3">
@@ -120,6 +125,7 @@ export default function SubformsLibrary() {
                   key={f.id}
                   field={f}
                   subformsLibrary={[]}
+                  duplicateVariable={variableCounts[f.variable] > 1}
                   onUpdate={(updated) =>
                     setSelected({ ...selected, fields: selected.fields.map((x) => (x.id === f.id ? updated : x)) })
                   }

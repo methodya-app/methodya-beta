@@ -51,6 +51,18 @@ export function findFieldsMissingCustomMessage(fields) {
   return (fields || []).filter((f) => f.validation?.enabled && !f.validation?.custom_message?.trim());
 }
 
+// El nombre de variable ({{variable}}) identifica el campo dentro de los
+// valores diligenciados y de la plantilla de vaciamiento: no puede repetirse
+// dentro del mismo formulario (o subformulario).
+export function findDuplicateVariables(fields) {
+  const counts = new Map();
+  for (const f of fields || []) {
+    if (!f.variable) continue;
+    counts.set(f.variable, (counts.get(f.variable) || 0) + 1);
+  }
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([variable]) => variable);
+}
+
 function testPattern(pattern, value, mode) {
   try {
     const rx = new RegExp(pattern, 'i');
