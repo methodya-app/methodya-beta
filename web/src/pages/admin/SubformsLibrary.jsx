@@ -30,6 +30,7 @@ export default function SubformsLibrary() {
   const [subforms, setSubforms] = useState([]);
   const [selected, setSelected] = useState(null);
   const [nombre, setNombre] = useState('');
+  const [savedAt, setSavedAt] = useState(null);
 
   const load = async () => {
     const data = await api.get('/subforms');
@@ -49,9 +50,11 @@ export default function SubformsLibrary() {
   };
 
   const save = async () => {
+    setSavedAt(null);
     try {
       await api.put(`/subforms/${selected._id}`, { nombre: selected.nombre, fields: selected.fields });
-      load();
+      await load();
+      setSavedAt(new Date());
     } catch (err) {
       alert('No se pudo guardar: ' + err.message);
     }
@@ -60,6 +63,7 @@ export default function SubformsLibrary() {
   const remove = async (id) => {
     await api.del(`/subforms/${id}`);
     if (selected?._id === id) setSelected(null);
+    setSavedAt(null);
     load();
   };
 
@@ -88,7 +92,10 @@ export default function SubformsLibrary() {
           {subforms.map((sf) => (
             <button
               key={sf._id}
-              onClick={() => setSelected(sf)}
+              onClick={() => {
+                setSelected(sf);
+                setSavedAt(null);
+              }}
               className={`w-full text-left p-3 text-sm hover:bg-deepViolet/5 ${
                 selected?._id === sf._id ? 'bg-cognitiveTeal-light/40' : ''
               }`}
@@ -110,7 +117,8 @@ export default function SubformsLibrary() {
                 onChange={(e) => setSelected({ ...selected, nombre: e.target.value })}
                 className="font-display font-bold text-lg text-deepViolet bg-transparent border-b border-transparent hover:border-deepViolet/20 focus:border-deepViolet focus:outline-none"
               />
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {savedAt && <span className="text-xs text-emerald-600">Guardado ✓</span>}
                 <button onClick={() => remove(selected._id)} className="text-xs text-red-500 hover:underline">
                   Eliminar
                 </button>
