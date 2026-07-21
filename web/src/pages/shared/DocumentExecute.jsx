@@ -18,6 +18,7 @@ export default function DocumentExecute() {
   const [subformsLibrary, setSubformsLibrary] = useState([]);
   const [paragraphsLibrary, setParagraphsLibrary] = useState([]);
   const [projectUsers, setProjectUsers] = useState([]);
+  const [globalValidations, setGlobalValidations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -25,14 +26,16 @@ export default function DocumentExecute() {
     const doc = await api.get(`/documents/${id}`);
     setData(doc);
     setValues(doc.values || {});
-    const [subforms, paragraphs, users] = await Promise.all([
+    const [subforms, paragraphs, users, validations] = await Promise.all([
       api.get('/subforms'),
       api.get('/paragraphs'),
       api.get(`/projects/${doc.document.project_id}/users`),
+      api.get(`/projects/${doc.document.project_id}/validations`),
     ]);
     setSubformsLibrary(subforms.subforms);
     setParagraphsLibrary(paragraphs.paragraphs);
     setProjectUsers(users.project_users);
+    setGlobalValidations(validations.validations);
   }, [id]);
 
   useEffect(() => {
@@ -139,6 +142,7 @@ export default function DocumentExecute() {
           readOnly={readOnly}
           subformsLibrary={subformsLibrary}
           paragraphsLibrary={paragraphsLibrary}
+          globalValidations={globalValidations}
           reviewMode={reviewMode}
           documentId={id}
           comments={data.comments}

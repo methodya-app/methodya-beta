@@ -1,8 +1,7 @@
-// Réplica en el cliente de api/_lib/validation.js (solo la regla propia del
-// campo: obligatorio + regex/longitud) para dar feedback inmediato al perder
-// el foco. El backend sigue siendo la fuente de verdad (también valida las
-// validaciones globales del proyecto, que aquí no se evalúan).
-export function validateFieldClient(field, value) {
+// Réplica en el cliente de api/_lib/validation.js (regla propia del campo +
+// validaciones globales del proyecto) para dar feedback inmediato al perder
+// el foco. El backend sigue siendo la fuente de verdad.
+export function validateFieldClient(field, value, globalValidations = []) {
   const errors = [];
   const strValue = Array.isArray(value) ? value.join(', ') : String(value ?? '');
 
@@ -24,18 +23,31 @@ export function validateFieldClient(field, value) {
       errors.push(`La longitud máxima permitida es de ${v.max_length} caracteres.`);
     }
     if (v.pattern) {
-      try {
-        const rx = new RegExp(v.pattern, 'i');
-        const matches = rx.test(strValue);
-        const ok = v.mode === 'must_not_match' ? !matches : matches;
-        if (!ok) {
-          errors.push(v.custom_message?.trim() || `No cumple la regla de validación: ${v.description || 'formato inválido'}`);
-        }
-      } catch {
-        // patrón inválido: no bloquear al usuario por un error de configuración
+      const ok = testPattern(v.pattern, strValue, v.mode || 'must_match');
+      if (!ok) {
+        errors.push(v.custom_message?.trim() || `No cumple la regla de validación: ${v.description || 'formato inválido'}`);
       }
     }
   }
 
+  for (const gv of globalValidations) {
+    if (!gv.activo) continue;
+    const ok = testPattern(gv.pattern, strValue, gv.mode || 'must_not_match');
+    if (!ok) {
+      errors.push(`Validación global incumplida: ${gv.descripcion}`);
+    }
+  }
+
   return errors;
+}
+
+function testPattern(pattern, value, mode) {
+  try {
+    const rx = new RegExp(pattern, 'i');
+    const matches = rx.test(value);
+    return mode === 'must_not_match' ? !matches : matches;
+  } catch {
+    // patrón inválido: no bloquear al usuario por un error de configuración
+    return true;
+  }
 }

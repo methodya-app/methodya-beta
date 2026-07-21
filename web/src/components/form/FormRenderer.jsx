@@ -16,6 +16,7 @@ export default function FormRenderer({
   readOnly = false,
   subformsLibrary = [],
   paragraphsLibrary = [],
+  globalValidations = [],
   reviewMode = false,
   documentId,
   comments = [],
@@ -26,7 +27,7 @@ export default function FormRenderer({
 
   const handleBlur = (field) => {
     if (!onErrorsChange) return;
-    const fieldErrors = validateFieldClient(field, values[field.variable]);
+    const fieldErrors = validateFieldClient(field, values[field.variable], globalValidations);
     const next = { ...errors };
     if (fieldErrors.length) next[field.variable] = fieldErrors;
     else delete next[field.variable];
