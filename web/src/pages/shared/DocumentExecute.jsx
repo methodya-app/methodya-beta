@@ -4,6 +4,30 @@ import { api } from '../../lib/api.js';
 import { useAuth } from '../../lib/auth.jsx';
 import StateBadge from '../../components/StateBadge.jsx';
 import FormRenderer from '../../components/form/FormRenderer.jsx';
+import ProcessingModal from '../../components/ProcessingModal.jsx';
+
+// Aviso flotante: se muestra en una posición fija de la pantalla (no dentro
+// del flujo del documento) para que se vea sin importar el scroll, ya que
+// los botones de acción viven en una barra fija al fondo.
+function Toast({ toast, onClose }) {
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+  }, [toast, onClose]);
+
+  if (!toast) return null;
+  const isError = toast.type === 'error';
+  return (
+    <div
+      className={`fixed bottom-24 right-6 z-50 max-w-sm rounded-lg shadow-lg p-3 text-sm font-semibold ${
+        isError ? 'bg-red-600 text-white' : 'bg-activeMint text-emerald-900'
+      }`}
+    >
+      {toast.text}
+    </div>
+  );
+}
 
 // Pantalla de "modo ejecución" (punto 2.1.6): diligenciar o revisar un
 // documento a través de su formulario. La reutilizan el Creador Experto, el
@@ -19,23 +43,30 @@ export default function DocumentExecute() {
   const [paragraphsLibrary, setParagraphsLibrary] = useState([]);
   const [projectUsers, setProjectUsers] = useState([]);
   const [globalValidations, setGlobalValidations] = useState([]);
+  const [languagetoolConfigured, setLanguagetoolConfigured] = useState(false);
+  const [spellcheckSubmitMode, setSpellcheckSubmitMode] = useState('off');
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [vaciando, setVaciando] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [spellWarning, setSpellWarning] = useState(null);
 
   const load = useCallback(async () => {
     const doc = await api.get(`/documents/${id}`);
     setData(doc);
     setValues(doc.values || {});
-    const [subforms, paragraphs, users, validations] = await Promise.all([
+    const [subforms, paragraphs, users, validations, publicSettings] = await Promise.all([
       api.get('/subforms'),
       api.get('/paragraphs'),
       api.get(`/projects/${doc.document.project_id}/users`),
       api.get(`/projects/${doc.document.project_id}/validations`),
+      api.get('/settings/public'),
     ]);
     setSubformsLibrary(subforms.subforms);
     setParagraphsLibrary(paragraphs.paragraphs);
     setProjectUsers(users.project_users);
     setGlobalValidations(validations.validations);
+    setLanguagetoolConfigured(publicSettings.languagetool_configured);
+    setSpellcheckSubmitMode(publicSettings.spellcheck_submit_mode || 'off');
   }, [id]);
 
   useEffect(() => {
@@ -53,62 +84,150 @@ export default function DocumentExecute() {
     (access.is_revisor_estilo && document.estado === 'Revisión Estilo');
   const readOnly = access.is_read_only || !canEdit;
 
+  // Nombres de campo -> etiqueta legible, para armar mensajes de error claros.
+  const fieldLabel = (variable) =>
+    form?.sections?.flatMap((s) => s.fields).find((f) => f.variable === variable)?.label || variable;
+
+  const showValidationErrors = (fieldErrors) => {
+    setErrors(fieldErrors);
+    const labels = Object.keys(fieldErrors).map(fieldLabel);
+    setToast({
+      type: 'error',
+      text:
+        labels.length === 1
+          ? `Falta completar o corregir el campo "${labels[0]}".`
+          : `Faltan completar o corregir estos campos: ${labels.join(', ')}.`,
+    });
+    const firstVariable = Object.keys(fieldErrors)[0];
+    if (firstVariable) {
+      window.document
+        .getElementById(`field-${firstVariable}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   const saveDraft = async () => {
     setSaving(true);
-    setMessage('');
+    setToast(null);
     try {
       await api.put(`/documents/${id}/data`, { values, partial: true });
-      setMessage('Guardado ✓');
+      setToast({ type: 'success', text: 'Guardado ✓' });
     } catch (err) {
-      setMessage('Error al guardar: ' + err.message);
+      setToast({ type: 'error', text: 'Error al guardar: ' + err.message });
     } finally {
       setSaving(false);
     }
   };
 
-  const submitAction = async (action) => {
+  // Tipos de campo de texto libre en los que tiene sentido revisar ortografía
+  // (debe coincidir con SPELLCHECKABLE_TYPES de FormRenderer.jsx).
+  const SPELLCHECKABLE_TYPES = ['text', 'textarea', 'predefined_paragraph'];
+
+  // Revisa ortografía de todos los campos de texto libre diligenciados y
+  // devuelve solo los que tienen algún error/sugerencia pendiente. Si el
+  // corrector falla para un campo (servicio caído, límite alcanzado), ese
+  // campo se ignora en vez de bloquear todo el flujo de envío.
+  const findSpellingIssues = async () => {
+    const fields = (form?.sections?.flatMap((s) => s.fields) || []).filter(
+      (f) => SPELLCHECKABLE_TYPES.includes(f.type) && (values[f.variable] || '').toString().trim()
+    );
+    if (fields.length === 0) return [];
+    const results = await Promise.all(
+      fields.map((f) =>
+        api
+          .post('/ai/check-spelling', { text: values[f.variable] })
+          .then((r) => ({ field: f, issues: r.issues || [] }))
+          .catch(() => ({ field: f, issues: [] }))
+      )
+    );
+    return results.filter((r) => r.issues.length > 0);
+  };
+
+  const doSubmit = async (action) => {
     setSaving(true);
-    setMessage('');
+    setToast(null);
     try {
       // Guarda y valida de forma estricta antes de cambiar de estado.
       await api.put(`/documents/${id}/data`, { values, partial: false });
       await api.post(`/documents/${id}/submit`, { action });
       await load();
       setErrors({});
-      setMessage('Acción ejecutada ✓');
+      setSpellWarning(null);
+      setToast({ type: 'success', text: 'Acción ejecutada ✓' });
     } catch (err) {
-      if (err.errors) setErrors(err.errors);
-      setMessage('No se pudo completar: ' + err.message);
+      if (err.errors) showValidationErrors(err.errors);
+      else setToast({ type: 'error', text: 'No se pudo completar: ' + err.message });
     } finally {
       setSaving(false);
     }
   };
 
+  const submitAction = async (action) => {
+    if (spellcheckSubmitMode !== 'off' && languagetoolConfigured) {
+      setSaving(true);
+      setToast(null);
+      const flagged = await findSpellingIssues();
+      setSaving(false);
+
+      if (flagged.length > 0) {
+        const labels = flagged.map((f) => f.field.label);
+        if (spellcheckSubmitMode === 'block') {
+          setToast({
+            type: 'error',
+            text: `Hay posibles errores ortográficos sin revisar en: ${labels.join(
+              ', '
+            )}. Usa "Revisar ortografía" en cada campo para corregirlos antes de enviar.`,
+          });
+          window.document
+            .getElementById(`field-${flagged[0].field.variable}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+        // modo 'warn': pide confirmación explícita antes de enviar
+        setSpellWarning({ action, labels });
+        return;
+      }
+    }
+    await doSubmit(action);
+  };
+
+  const confirmSubmitDespiteWarning = () => {
+    const pending = spellWarning;
+    setSpellWarning(null);
+    if (pending) doSubmit(pending.action);
+  };
+
   const saveAndValidate = async () => {
     setSaving(true);
-    setMessage('');
+    setToast(null);
     try {
       await api.put(`/documents/${id}/data`, { values, partial: false });
       setErrors({});
-      setMessage('Guardado y validado ✓');
+      setToast({ type: 'success', text: 'Guardado y validado ✓' });
     } catch (err) {
-      if (err.errors) setErrors(err.errors);
-      setMessage('No se pudo guardar: ' + err.message);
+      if (err.errors) showValidationErrors(err.errors);
+      else setToast({ type: 'error', text: 'No se pudo guardar: ' + err.message });
     } finally {
       setSaving(false);
     }
   };
 
   const vaciar = async () => {
+    if (vaciando) return; // ya hay un vaciamiento en curso, ignora el doble clic
     setSaving(true);
+    setVaciando(true);
     try {
-      await api.post(`/documents/${id}/vaciar`);
+      const result = await api.post(`/documents/${id}/vaciar`);
       await load();
-      setMessage('Vaciamiento ejecutado ✓');
+      setToast({
+        type: 'success',
+        text: result.real ? 'Vaciamiento ejecutado en Google Drive ✓' : 'Vaciamiento ejecutado ✓',
+      });
     } catch (err) {
-      setMessage('Error: ' + err.message);
+      setToast({ type: 'error', text: 'Error: ' + err.message });
     } finally {
       setSaving(false);
+      setVaciando(false);
     }
   };
 
@@ -125,7 +244,6 @@ export default function DocumentExecute() {
         <p className="text-sm text-slate-500">{form?.titulo}</p>
       </div>
 
-      {message && <div className="text-sm text-deepViolet bg-deepViolet/5 rounded-lg p-2">{message}</div>}
       {readOnly && (
         <div className="text-sm text-warmAmber-hover bg-warmAmber-light rounded-lg p-2">
           Este documento está en modo solo lectura para tu rol en su estado actual.
@@ -143,6 +261,7 @@ export default function DocumentExecute() {
           subformsLibrary={subformsLibrary}
           paragraphsLibrary={paragraphsLibrary}
           globalValidations={globalValidations}
+          languagetoolConfigured={languagetoolConfigured}
           reviewMode={reviewMode}
           documentId={id}
           comments={data.comments}
@@ -153,15 +272,53 @@ export default function DocumentExecute() {
 
       {data.vaciado_resultado && (
         <div className="paper-card rounded-xl p-4">
-          <p className="font-display font-bold text-deepViolet mb-2">Resultado del vaciamiento (simulado)</p>
-          <pre className="whitespace-pre-wrap text-xs bg-white p-3 rounded-lg border border-deepViolet/10">
-            {data.vaciado_resultado}
-          </pre>
+          <p className="font-display font-bold text-deepViolet mb-2">
+            {data.vaciado_drive_file_id ? 'Documento vaciado en Google Drive' : 'Resultado del vaciamiento (simulado)'}
+          </p>
+          {data.vaciado_drive_file_id ? (
+            <a
+              href={data.vaciado_resultado}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm text-cognitiveTeal hover:underline break-all"
+            >
+              {data.vaciado_resultado} ↗
+            </a>
+          ) : (
+            <pre className="whitespace-pre-wrap text-xs bg-white p-3 rounded-lg border border-deepViolet/10">
+              {data.vaciado_resultado}
+            </pre>
+          )}
         </div>
       )}
 
       {!readOnly && (
         <div className="sticky bottom-0 bg-empatheticLinen/95 backdrop-blur border-t border-deepViolet/10 p-3 flex flex-wrap gap-2 justify-end -mx-6">
+          {spellWarning && (
+            <div className="w-full flex flex-wrap items-center justify-between gap-2 rounded-lg bg-warmAmber-light text-warmAmber-hover p-2.5 text-sm">
+              <span>
+                Posibles errores ortográficos sin revisar en: {spellWarning.labels.join(', ')}.
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSpellWarning(null)}
+                  className="px-3 py-1.5 rounded-lg bg-white text-warmAmber-hover text-xs font-semibold border border-warmAmber-hover/30"
+                >
+                  Revisar campos
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmSubmitDespiteWarning}
+                  disabled={saving}
+                  className="px-3 py-1.5 rounded-lg bg-cognitiveTeal text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Enviar de todos modos
+                </button>
+              </div>
+            </div>
+          )}
+
           {access.is_creador && (
             <>
               <button
@@ -260,6 +417,9 @@ export default function DocumentExecute() {
           )}
         </div>
       )}
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
+      <ProcessingModal open={vaciando} message="Vaciando documento... esto puede tardar unos segundos." />
     </div>
   );
 }

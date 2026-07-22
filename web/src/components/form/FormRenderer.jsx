@@ -2,6 +2,11 @@ import { useState } from 'react';
 import ParagraphPickerModal from './ParagraphPickerModal.jsx';
 import CommentsPanel from '../CommentsPanel.jsx';
 import { validateFieldClient } from '../../lib/validateField.js';
+import { api } from '../../lib/api.js';
+
+// Tipos de campo de texto libre en los que tiene sentido ofrecer el botón
+// "Revisar ortografía" (los demás son selección/estructurados).
+const SPELLCHECKABLE_TYPES = ['text', 'textarea', 'predefined_paragraph'];
 
 // Motor de ejecución de formularios: dado un `form` (secciones/campos) y un
 // objeto `values`, renderiza cada campo según su tipo. Se usa tanto para que
@@ -17,6 +22,7 @@ export default function FormRenderer({
   subformsLibrary = [],
   paragraphsLibrary = [],
   globalValidations = [],
+  languagetoolConfigured = false,
   reviewMode = false,
   documentId,
   comments = [],
@@ -51,6 +57,7 @@ export default function FormRenderer({
                 readOnly={readOnly}
                 subformsLibrary={subformsLibrary}
                 paragraphsLibrary={paragraphsLibrary}
+                languagetoolConfigured={languagetoolConfigured}
                 reviewMode={reviewMode}
                 documentId={documentId}
                 comments={comments}
@@ -77,6 +84,7 @@ function FieldRenderer({
   readOnly,
   subformsLibrary,
   paragraphsLibrary,
+  languagetoolConfigured,
   reviewMode,
   documentId,
   comments,
@@ -84,9 +92,36 @@ function FieldRenderer({
   onCommentsChange,
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [spellIssues, setSpellIssues] = useState(null);
+  const [spellChecking, setSpellChecking] = useState(false);
+  const [spellError, setSpellError] = useState('');
+
+  const spellCheckable = SPELLCHECKABLE_TYPES.includes(field.type) && languagetoolConfigured;
+
+  const runSpellCheck = async () => {
+    setSpellChecking(true);
+    setSpellError('');
+    try {
+      const result = await api.post('/ai/check-spelling', { text: value || '' });
+      setSpellIssues(result.issues);
+    } catch (err) {
+      setSpellError('No se pudo revisar la ortografía: ' + err.message);
+    } finally {
+      setSpellChecking(false);
+    }
+  };
+
+  const applySuggestion = (issue, suggestion) => {
+    const text = value || '';
+    const next = text.slice(0, issue.offset) + suggestion + text.slice(issue.offset + issue.length);
+    onChange(next);
+    // Los offsets del resto de incidencias quedan desactualizados tras el
+    // reemplazo; se pide revisar de nuevo en vez de arriesgar posiciones mal calculadas.
+    setSpellIssues(null);
+  };
 
   return (
-    <div>
+    <div id={`field-${field.variable}`}>
       <label className="block text-sm font-semibold text-slate-700 mb-1">
         {field.label} {field.required && <span className="text-red-500">*</span>}
       </label>
@@ -107,6 +142,49 @@ function FieldRenderer({
             <li key={i}>• {e}</li>
           ))}
         </ul>
+      )}
+
+      {spellCheckable && !readOnly && (
+        <div className="mt-1.5">
+          <button
+            type="button"
+            onClick={runSpellCheck}
+            disabled={spellChecking}
+            className="text-xs font-semibold text-cognitiveTeal hover:underline disabled:opacity-50"
+          >
+            {spellChecking ? 'Revisando ortografía...' : '🔤 Revisar ortografía'}
+          </button>
+
+          {spellError && <p className="mt-1 text-xs text-red-500">{spellError}</p>}
+
+          {spellIssues && spellIssues.length === 0 && (
+            <p className="mt-1 text-xs text-emerald-600">Sin errores ortográficos encontrados ✓</p>
+          )}
+
+          {spellIssues && spellIssues.length > 0 && (
+            <ul className="mt-1.5 space-y-1">
+              {spellIssues.map((issue, i) => (
+                <li key={i} className="text-xs bg-warmAmber-light text-warmAmber-hover rounded-md p-1.5">
+                  {issue.message}
+                  {issue.suggestions?.length > 0 && (
+                    <span className="ml-1">
+                      {issue.suggestions.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => applySuggestion(issue, s)}
+                          className="ml-1 underline font-semibold"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {documentId && (
@@ -149,6 +227,7 @@ function FieldInput({ field, value, onChange, onBlur, readOnly, subformsLibrary,
           disabled={readOnly}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
+          spellCheck="true"
         />
       );
 
@@ -206,17 +285,23 @@ function FieldInput({ field, value, onChange, onBlur, readOnly, subformsLibrary,
         </div>
       );
 
-    case 'predefined_paragraph':
+    case 'predefined_paragraph': {
+      const lockedToSelection = !!field.paragraph_lock_to_selection;
       return (
         <div>
           <textarea
             className={base}
             rows={4}
             value={value || ''}
-            disabled={readOnly}
+            disabled={readOnly || lockedToSelection}
             onChange={(e) => onChange(e.target.value)}
             onBlur={onBlur}
-            placeholder="Selecciona un párrafo predefinido o escribe libremente..."
+            spellCheck="true"
+            placeholder={
+              lockedToSelection
+                ? 'Usa el botón para elegir un párrafo predefinido...'
+                : 'Selecciona un párrafo predefinido o escribe libremente...'
+            }
           />
           {!readOnly && (
             <button
@@ -229,6 +314,7 @@ function FieldInput({ field, value, onChange, onBlur, readOnly, subformsLibrary,
           )}
         </div>
       );
+    }
 
     case 'subform':
       return (
@@ -245,6 +331,7 @@ function FieldInput({ field, value, onChange, onBlur, readOnly, subformsLibrary,
           disabled={readOnly}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
+          spellCheck="true"
         />
       );
   }

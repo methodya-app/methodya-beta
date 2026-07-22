@@ -134,10 +134,42 @@ create table if not exists public.settings (
   id int primary key default 1,
   gemini_api_key text,
   backend_endpoint text,
+  languagetool_username text,
+  languagetool_api_key text,
+  -- Validación ortográfica automática al enviar un documento a la siguiente
+  -- etapa: 'off' (no valida), 'warn' (avisa pero permite continuar) o
+  -- 'block' (no deja avanzar hasta revisar los campos señalados).
+  spellcheck_submit_mode text not null default 'off'
+    check (spellcheck_submit_mode in ('off','warn','block')),
+  -- Conexión OAuth2 con Google (Drive/Docs/Slides) para el vaciamiento real
+  -- de plantillas: client_id/secret del OAuth Client de Google Cloud, y el
+  -- refresh_token obtenido al conectar una cuenta de Google desde
+  -- Parámetros del servidor (botón "Conectar cuenta de Google").
+  google_oauth_client_id text,
+  google_oauth_client_secret text,
+  google_oauth_refresh_token text,
+  google_oauth_connected_email text,
+  google_oauth_pending_state text,
   updated_by uuid references public.profiles(id),
   updated_at timestamptz not null default now(),
   constraint single_row check (id = 1)
 );
+
+-- Por si la tabla ya existía de una instalación previa (create table if not
+-- exists no agrega columnas nuevas a una tabla ya creada).
+alter table public.settings add column if not exists languagetool_username text;
+alter table public.settings add column if not exists languagetool_api_key text;
+alter table public.settings add column if not exists spellcheck_submit_mode text not null default 'off';
+alter table public.settings drop constraint if exists settings_spellcheck_submit_mode_check;
+alter table public.settings add constraint settings_spellcheck_submit_mode_check
+  check (spellcheck_submit_mode in ('off','warn','block'));
+alter table public.settings drop column if exists google_service_account_email;
+alter table public.settings drop column if exists google_service_account_private_key;
+alter table public.settings add column if not exists google_oauth_client_id text;
+alter table public.settings add column if not exists google_oauth_client_secret text;
+alter table public.settings add column if not exists google_oauth_refresh_token text;
+alter table public.settings add column if not exists google_oauth_connected_email text;
+alter table public.settings add column if not exists google_oauth_pending_state text;
 
 insert into public.settings (id) values (1) on conflict (id) do nothing;
 

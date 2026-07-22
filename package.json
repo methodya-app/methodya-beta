@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "google-auth-library": "^10.9.0",
     "mongodb": "^6.9.0"
   }
 }

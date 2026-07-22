@@ -125,7 +125,7 @@ export default function FieldEditor({ field, onUpdate, onRemove, subformsLibrary
       )}
 
       {field.type === 'predefined_paragraph' && (
-        <div>
+        <div className="space-y-2">
           <label className="block text-xs font-semibold text-slate-500 mb-0.5">
             Tags a filtrar en el modal (una por línea, vacío = todas)
           </label>
@@ -138,6 +138,14 @@ export default function FieldEditor({ field, onUpdate, onRemove, subformsLibrary
               patch({ paragraph_tags: e.target.value.split('\n').filter((v) => v.trim()) });
             }}
           />
+          <label className="flex items-center gap-1.5 text-sm">
+            <input
+              type="checkbox"
+              checked={!!field.paragraph_lock_to_selection}
+              onChange={(e) => patch({ paragraph_lock_to_selection: e.target.checked })}
+            />
+            Solo permitir elegir el párrafo predefinido (no permitir agregar o editar texto adicional)
+          </label>
         </div>
       )}
 

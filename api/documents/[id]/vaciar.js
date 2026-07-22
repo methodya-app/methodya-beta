@@ -3,14 +3,21 @@ import { requireAuth } from '../../_lib/auth.js';
 import { supabaseAdmin } from '../../_lib/supabaseAdmin.js';
 import { getDb } from '../../_lib/mongo.js';
 import { loadDocumentWithAccess } from '../../_lib/documentAccess.js';
+import { getGoogleOAuthConfig } from '../../_lib/googleAuth.js';
+import { extractDriveId, findOrCreateSubfolder, copyFile, getFile, trashFile } from '../../_lib/googleDrive.js';
+import { replaceVariablesInDoc, replaceVariablesInSlides } from '../../_lib/googleDocsSlides.js';
+
+// El vaciamiento real hace varias llamadas a Google (copiar, reemplazar) y
+// tarda varios segundos. Si el clic se dispara dos veces, sin este candado
+// se disparan dos vaciamientos en paralelo sobre el mismo documento.
+const LOCK_TIMEOUT_MS = 3 * 60 * 1000; // por si un intento anterior quedó a medias sin liberar el candado
 
 // Módulo de vaciamiento (punto 2.1.4 del documento de la beta).
-// FASE 1 / SIMULACIÓN: no llama a la API real de Google Slides/Docs (eso
-// requiere credenciales OAuth de Google Cloud, fuera de alcance de esta
-// primera versión). En su lugar reproduce el mismo motor de reemplazo que
-// tendría la integración real: busca {{variable}} en la plantilla de texto
-// configurada en el proyecto y la sustituye por el valor capturado en el
-// formulario, dejando el resultado guardado y disponible para copiar/descargar.
+// Si hay una cuenta de Google conectada (Parámetros del servidor) y el
+// proyecto tiene plantilla + carpeta de Drive, hace el vaciamiento real
+// contra Google Docs/Slides. Si falta cualquiera de esas piezas, cae
+// automáticamente a la simulación de texto (igual que antes), para que el
+// módulo nunca quede bloqueado por falta de configuración.
 export default withCors(async (req, res) => {
   if (req.method !== 'POST') throw new ApiError(405, 'Método no permitido');
 
@@ -24,32 +31,126 @@ export default withCors(async (req, res) => {
     throw new ApiError(403, 'Solo el Administrador o el Revisor de Estilo pueden vaciar el documento');
   }
 
-  const template = access.document.projects?.plantilla_texto_simulado;
-  if (!template) {
-    throw new ApiError(
-      400,
-      'El proyecto no tiene una plantilla de texto simulada configurada (Módulo de Selección de plantilla)'
-    );
-  }
-
   const db = await getDb();
-  const data = await db.collection('document_data').findOne({ document_id: id });
-  const values = data?.values || {};
 
-  let resultado = template;
-  for (const [key, val] of Object.entries(values)) {
-    const text = Array.isArray(val) ? val.join(', ') : typeof val === 'object' ? '' : String(val ?? '');
-    resultado = resultado.replaceAll(`{{${key}}}`, text);
-  }
-
+  // Asegura que exista la fila de datos del documento (sin pisar valores si
+  // ya existe), para poder adquirir el candado con una operación atómica.
   await db.collection('document_data').updateOne(
     { document_id: id },
-    { $set: { vaciado_resultado: resultado, vaciado_at: new Date() } },
+    { $setOnInsert: { document_id: id, values: {}, comments: [] } },
     { upsert: true }
   );
 
-  const admin = supabaseAdmin();
-  await admin.from('documents').update({ vaciado_at: new Date().toISOString() }).eq('id', id);
+  // Candado atómico: findOneAndUpdate hace el "leer y marcar" en una sola
+  // operación de Mongo, así que dos peticiones que lleguen al mismo tiempo
+  // (doble clic, doble disparo del evento) no pueden colarse ambas — la
+  // segunda simplemente no encuentra ningún documento que cumpla el filtro
+  // (porque la primera ya puso vaciado_en_progreso) y recibe null.
+  const existing = await db.collection('document_data').findOneAndUpdate(
+    {
+      document_id: id,
+      $or: [
+        { vaciado_en_progreso: { $exists: false } },
+        { vaciado_en_progreso: { $lt: new Date(Date.now() - LOCK_TIMEOUT_MS) } },
+      ],
+    },
+    { $set: { vaciado_en_progreso: new Date() } },
+    { returnDocument: 'before' }
+  );
+  if (!existing) {
+    throw new ApiError(409, 'Ya se está vaciando este documento, espera a que termine.');
+  }
 
-  return res.status(200).json({ vaciado_resultado: resultado });
+  try {
+    const project = access.document.projects || {};
+    const values = existing?.values || {};
+
+    const googleConfig = await getGoogleOAuthConfig();
+    const templateFileId = extractDriveId(project.plantilla_url);
+    const folderId = extractDriveId(project.drive_folder_url);
+    const canDoReal = !!(googleConfig?.refreshToken && templateFileId && folderId && project.plantilla_tipo);
+
+    const admin = supabaseAdmin();
+
+    if (canDoReal) {
+      const file = await vaciarReal({
+        document: access.document,
+        project,
+        values,
+        templateFileId,
+        folderId,
+        previousFileId: existing?.vaciado_drive_file_id || null,
+      });
+
+      await db.collection('document_data').updateOne(
+        { document_id: id },
+        {
+          $set: {
+            vaciado_resultado: file.webViewLink || file.id,
+            vaciado_drive_file_id: file.id,
+            vaciado_at: new Date(),
+          },
+        }
+      );
+      await admin.from('documents').update({ vaciado_at: new Date().toISOString() }).eq('id', id);
+      return res.status(200).json({ vaciado_resultado: file.webViewLink, real: true });
+    }
+
+    // --- Simulación (sin cuenta de Google o sin plantilla/carpeta de Drive) ---
+    const template = project.plantilla_texto_simulado;
+    if (!template) {
+      throw new ApiError(
+        400,
+        'El proyecto no tiene plantilla configurada (ni de Google Drive ni de texto simulado). Ve a "Plantilla y vaciamiento".'
+      );
+    }
+    let resultado = template;
+    for (const [key, val] of Object.entries(values)) {
+      const text = Array.isArray(val) ? val.join(', ') : typeof val === 'object' ? '' : String(val ?? '');
+      resultado = resultado.replaceAll(`{{${key}}}`, text);
+    }
+
+    await db.collection('document_data').updateOne(
+      { document_id: id },
+      { $set: { vaciado_resultado: resultado, vaciado_at: new Date() }, $unset: { vaciado_drive_file_id: '' } }
+    );
+    await admin.from('documents').update({ vaciado_at: new Date().toISOString() }).eq('id', id);
+    return res.status(200).json({ vaciado_resultado: resultado, real: false });
+  } finally {
+    await db.collection('document_data').updateOne({ document_id: id }, { $unset: { vaciado_en_progreso: '' } });
+  }
 });
+
+// Hace el vaciamiento real: crea (o reutiliza) la subcarpeta con el código
+// del documento, copia la plantilla dentro de ella y reemplaza las
+// variables {{variable}} por los valores diligenciados. La plantilla
+// original nunca se modifica, solo se copia.
+//
+// Si el documento ya se había vaciado antes (previousFileId), primero se
+// genera y se rellena la copia NUEVA por completo, y solo cuando esa copia
+// ya quedó lista se envía el archivo anterior a la papelera de Drive (no se
+// borra permanentemente, se puede recuperar). Así nunca hay un momento en
+// que no exista ningún archivo válido, y no se depende de reimportar
+// contenido dentro del archivo anterior (el paso que resultaba frágil).
+async function vaciarReal({ document, project, values, templateFileId, folderId, previousFileId }) {
+  const subfolderId = await findOrCreateSubfolder(folderId, document.codigo);
+  const freshCopy = await copyFile(templateFileId, document.codigo, subfolderId);
+
+  if (project.plantilla_tipo === 'slides') {
+    await replaceVariablesInSlides(freshCopy.id, values);
+  } else {
+    await replaceVariablesInDoc(freshCopy.id, values);
+  }
+
+  if (previousFileId) {
+    try {
+      await trashFile(previousFileId);
+    } catch {
+      // El archivo de un vaciamiento anterior ya no existe o no es
+      // accesible (p. ej. lo borraron manualmente en Drive): no hay nada
+      // que enviar a la papelera, se sigue igual con la copia nueva.
+    }
+  }
+
+  return getFile(freshCopy.id);
+}

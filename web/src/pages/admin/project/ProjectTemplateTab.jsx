@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { api } from '../../../lib/api.js';
 
-// Módulo de Selección de plantilla y carpeta (punto 2.1.2). En esta beta el
-// "vaciamiento" es una SIMULACIÓN de texto (ver README): no llama a la API
-// real de Google Slides/Docs, que requiere credenciales OAuth adicionales.
+// Módulo de Selección de plantilla y carpeta (punto 2.1.2). Si hay una
+// cuenta de Google conectada en Parámetros, "Vaciar" hace el reemplazo real
+// sobre una copia de esta plantilla en Google Docs/Slides; si no, cae
+// automáticamente al modo simulado (texto de abajo).
 export default function ProjectTemplateTab({ project, onSaved, readOnly }) {
   const [tipo, setTipo] = useState(project.plantilla_tipo || 'docs');
   const [url, setUrl] = useState(project.plantilla_url || '');
   const [folder, setFolder] = useState(project.drive_folder_url || '');
   const [texto, setTexto] = useState(project.plantilla_texto_simulado || '');
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState(null);
+  const [checkError, setCheckError] = useState('');
 
   const save = async () => {
     setSaving(true);
@@ -26,12 +30,28 @@ export default function ProjectTemplateTab({ project, onSaved, readOnly }) {
     }
   };
 
+  const checkAccess = async () => {
+    setChecking(true);
+    setCheckResult(null);
+    setCheckError('');
+    try {
+      const result = await api.post(`/projects/${project.id}/check-drive-access`, {});
+      setCheckResult(result);
+    } catch (err) {
+      setCheckError(err.message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   return (
     <div className="paper-card rounded-xl p-5 space-y-4 max-w-2xl">
       <div className="bg-warmAmber-light text-warmAmber-hover text-xs rounded-lg p-3">
-        Fase 1 (beta): el vaciamiento se simula reemplazando <code>{'{{variable}}'}</code> sobre el
-        texto de plantilla configurado abajo. La integración real con la API de Google Slides/Docs
-        queda para una siguiente fase (requiere credenciales OAuth de Google Cloud).
+        Si en Parámetros del servidor hay una cuenta de Google conectada, "Vaciar" copia esta
+        plantilla y reemplaza <code>{'{{variable}}'}</code> directamente en Google Docs/Slides (la
+        plantilla original nunca se modifica). Si la carpeta destino y la plantilla son tuyas (de
+        esa misma cuenta), no hace falta compartir nada. Si no hay cuenta conectada, se usa el modo
+        simulado con el texto de abajo.
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -70,10 +90,49 @@ export default function ProjectTemplateTab({ project, onSaved, readOnly }) {
         />
       </div>
 
+      {!readOnly && (
+        <div>
+          <button
+            type="button"
+            onClick={checkAccess}
+            disabled={checking}
+            className="text-xs font-semibold text-deepViolet hover:underline disabled:opacity-50"
+          >
+            {checking ? 'Probando...' : '🔎 Probar conexión y permisos'}
+          </button>
+
+          {checkError && (
+            <p className="mt-1.5 text-xs text-red-600 bg-red-50 rounded-lg p-2">{checkError}</p>
+          )}
+
+          {checkResult && (
+            <div className="mt-1.5 text-xs rounded-lg p-2.5 bg-deepViolet/5 space-y-1">
+              <p className="text-slate-500">
+                Cuenta conectada: <span className="font-mono">{checkResult.connected_email || '—'}</span>
+              </p>
+              <p className={checkResult.folder?.ok ? 'text-emerald-600' : 'text-red-600'}>
+                {checkResult.folder?.ok
+                  ? `✓ Puede escribir en la carpeta "${checkResult.folder.name}".`
+                  : `✗ Sin permiso de escritura en la carpeta. Compártela con "${checkResult.connected_email}" como Editor (o verifica que sea de esa misma cuenta). ${
+                      checkResult.folder?.error || ''
+                    }`}
+              </p>
+              {checkResult.template && (
+                <p className={checkResult.template.ok ? 'text-emerald-600' : 'text-red-600'}>
+                  {checkResult.template.ok
+                    ? `✓ Puede leer la plantilla "${checkResult.template.name}".`
+                    : `✗ No puede leer la plantilla. Compártela con "${checkResult.connected_email}" (al menos como Lector). ${checkResult.template.error || ''}`}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div>
         <label className="block text-xs font-semibold text-slate-500 mb-1">
-          Texto base para la simulación de vaciamiento (usa {'{{variable}}'} igual que las
-          variables de los campos del formulario)
+          Texto base para el modo simulado (usa {'{{variable}}'} igual que las variables de los
+          campos del formulario)
         </label>
         <textarea
           disabled={readOnly}

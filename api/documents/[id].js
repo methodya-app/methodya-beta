@@ -20,6 +20,7 @@ export default withCors(async (req, res) => {
       values: data?.values || {},
       comments: data?.comments || [],
       vaciado_resultado: data?.vaciado_resultado || null,
+      vaciado_drive_file_id: data?.vaciado_drive_file_id || null,
       access: {
         role: access.projectRole,
         is_creador: access.isCreador,
@@ -46,6 +47,13 @@ export default withCors(async (req, res) => {
     }
     updates.updated_at = new Date().toISOString();
 
+    const { data: before, error: beforeError } = await admin
+      .from('documents')
+      .select('estado')
+      .eq('id', id)
+      .single();
+    if (beforeError) throw new ApiError(404, 'Documento no encontrado');
+
     const { data, error } = await admin
       .from('documents')
       .update(updates)
@@ -53,6 +61,23 @@ export default withCors(async (req, res) => {
       .select()
       .single();
     if (error) throw new ApiError(500, error.message);
+
+    // Registra en el historial cualquier cambio de estado hecho por el
+    // Administrador (edición manual, envío a la papelera o restauración).
+    if (updates.estado && updates.estado !== before.estado) {
+      let nota = 'Editado por el Administrador';
+      if (updates.estado === 'Eliminado') nota = 'Enviado a la papelera';
+      else if (before.estado === 'Eliminado') nota = 'Restaurado desde la papelera';
+
+      await admin.from('document_history').insert({
+        document_id: id,
+        estado_anterior: before.estado,
+        estado_nuevo: updates.estado,
+        actor_id: auth.profile.id,
+        nota,
+      });
+    }
+
     return res.status(200).json({ document: data });
   }
 

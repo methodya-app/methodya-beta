@@ -11,6 +11,11 @@ export default withCors(async (req, res) => {
   if (!role) throw new ApiError(403, 'Sin acceso al proyecto');
 
   if (req.method === 'GET') {
+    // trashed=1 -> solo documentos en la papelera (estado Eliminado); por
+    // defecto se excluyen (vista normal de documentos).
+    const trashed = req.query.trashed === '1' || req.query.trashed === 'true';
+    if (trashed) requireAdmin(auth); // la papelera es exclusiva del Administrador
+
     let query = admin
       .from('documents')
       .select(
@@ -22,6 +27,8 @@ export default withCors(async (req, res) => {
       )
       .eq('project_id', project_id)
       .order('created_at', { ascending: false });
+
+    query = trashed ? query.eq('estado', 'Eliminado') : query.neq('estado', 'Eliminado');
 
     // Filtra según el rol: cada perfil solo ve los documentos que le
     // corresponden por asignación y/o etapa del flujo.

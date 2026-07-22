@@ -1,14 +1,30 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../../lib/api.js';
 import StateBadge from '../../../components/StateBadge.jsx';
+import ProcessingModal from '../../../components/ProcessingModal.jsx';
+
+// Estados válidos para editar/restaurar un documento (todos menos
+// "Eliminado", que se maneja aparte con el botón dedicado de la papelera).
+const EDITABLE_STATES = [
+  'Pendiente',
+  'En proceso',
+  'Devuelto',
+  'Revisión Pedagógica',
+  'Revisión Estilo',
+  'Producción Multimedia',
+  'Detenido',
+  'Finalizado',
+];
 
 function usersByRole(projectUsers, role) {
   return projectUsers.filter((pu) => pu.role === role);
 }
 
 export default function ProjectDocumentsTab({ projectId, readOnly }) {
+  const [tab, setTab] = useState('documentos'); // 'documentos' | 'papelera'
   const [documents, setDocuments] = useState([]);
+  const [trashedDocuments, setTrashedDocuments] = useState([]);
   const [forms, setForms] = useState([]);
   const [projectUsers, setProjectUsers] = useState([]);
   const [docTypes, setDocTypes] = useState([]);
@@ -21,15 +37,23 @@ export default function ProjectDocumentsTab({ projectId, readOnly }) {
   const [revisorEstiloId, setRevisorEstiloId] = useState('');
   const [loading, setLoading] = useState(true);
 
+  const [editingId, setEditingId] = useState(null);
+  const [editValues, setEditValues] = useState(null);
+  const [restoringId, setRestoringId] = useState(null);
+  const [restoreEstado, setRestoreEstado] = useState('Pendiente');
+  const [vaciandoId, setVaciandoId] = useState(null);
+
   const load = async () => {
     setLoading(true);
-    const [docsData, formsData, usersData, typesData] = await Promise.all([
+    const [docsData, trashData, formsData, usersData, typesData] = await Promise.all([
       api.get(`/projects/${projectId}/documents`),
+      api.get(`/projects/${projectId}/documents?trashed=1`),
       api.get(`/forms?project_id=${projectId}`),
       api.get(`/projects/${projectId}/users`),
       api.get('/document-types'),
     ]);
     setDocuments(docsData.documents);
+    setTrashedDocuments(trashData.documents);
     setForms(formsData.forms);
     setProjectUsers(usersData.project_users);
     setDocTypes(typesData.document_types);
@@ -56,29 +80,109 @@ export default function ProjectDocumentsTab({ projectId, readOnly }) {
   };
 
   const vaciar = async (id) => {
+    if (vaciandoId) return; // ya hay un vaciamiento en curso, ignora el doble clic
+    setVaciandoId(id);
     try {
-      await api.post(`/documents/${id}/vaciar`);
-      alert('Vaciamiento simulado ejecutado. Puedes verlo en el detalle del documento.');
+      const result = await api.post(`/documents/${id}/vaciar`);
+      alert(
+        result.real
+          ? 'Vaciamiento ejecutado en Google Drive. Puedes verlo en el detalle del documento.'
+          : 'Vaciamiento simulado ejecutado. Puedes verlo en el detalle del documento.'
+      );
       load();
     } catch (err) {
       alert(err.message);
+    } finally {
+      setVaciandoId(null);
+    }
+  };
+
+  const startEdit = (d) => {
+    setEditingId(d.id);
+    setEditValues({
+      estado: d.estado,
+      creador_id: d.creador_id || '',
+      revisor_pedagogico_id: d.revisor_pedagogico_id || '',
+      revisor_estilo_id: d.revisor_estilo_id || '',
+    });
+  };
+
+  const saveEdit = async (id) => {
+    try {
+      await api.put(`/documents/${id}`, {
+        estado: editValues.estado,
+        creador_id: editValues.creador_id || null,
+        revisor_pedagogico_id: editValues.revisor_pedagogico_id || null,
+        revisor_estilo_id: editValues.revisor_estilo_id || null,
+      });
+      setEditingId(null);
+      setEditValues(null);
+      load();
+    } catch (err) {
+      alert('No se pudo guardar: ' + err.message);
+    }
+  };
+
+  const deleteDocument = async (d) => {
+    if (!window.confirm(`¿Enviar el documento "${d.codigo}" a la papelera? Podrás restaurarlo luego.`)) {
+      return;
+    }
+    try {
+      await api.put(`/documents/${d.id}`, { estado: 'Eliminado' });
+      load();
+    } catch (err) {
+      alert('No se pudo eliminar: ' + err.message);
+    }
+  };
+
+  const startRestore = (d) => {
+    setRestoringId(d.id);
+    setRestoreEstado('Pendiente');
+  };
+
+  const confirmRestore = async (id) => {
+    try {
+      await api.put(`/documents/${id}`, { estado: restoreEstado });
+      setRestoringId(null);
+      load();
+    } catch (err) {
+      alert('No se pudo restaurar: ' + err.message);
     }
   };
 
   return (
     <div className="space-y-4">
-      {!readOnly && (
-        <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 bg-deepViolet/5 rounded-lg p-1 w-fit">
+          <button
+            onClick={() => setTab('documentos')}
+            className={`px-3 py-1.5 rounded-md text-sm font-semibold ${
+              tab === 'documentos' ? 'bg-white shadow text-deepViolet' : 'text-deepViolet/60'
+            }`}
+          >
+            Documentos
+          </button>
+          <button
+            onClick={() => setTab('papelera')}
+            className={`px-3 py-1.5 rounded-md text-sm font-semibold ${
+              tab === 'papelera' ? 'bg-white shadow text-deepViolet' : 'text-deepViolet/60'
+            }`}
+          >
+            🗑️ Papelera {trashedDocuments.length > 0 && `(${trashedDocuments.length})`}
+          </button>
+        </div>
+
+        {!readOnly && tab === 'documentos' && (
           <button
             onClick={() => setShowForm((s) => !s)}
             className="px-4 py-2 rounded-lg bg-cognitiveTeal text-white text-sm font-semibold"
           >
             + Nuevo registro
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      {showForm && (
+      {showForm && tab === 'documentos' && (
         <form onSubmit={createDocument} className="paper-card rounded-xl p-4 grid sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1">Código</label>
@@ -178,7 +282,7 @@ export default function ProjectDocumentsTab({ projectId, readOnly }) {
 
       {loading ? (
         <p className="text-slate-500 text-sm">Cargando...</p>
-      ) : (
+      ) : tab === 'documentos' ? (
         <div className="paper-card rounded-xl overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-deepViolet/5 text-left text-xs uppercase text-deepViolet/70">
@@ -193,26 +297,123 @@ export default function ProjectDocumentsTab({ projectId, readOnly }) {
             </thead>
             <tbody>
               {documents.map((d) => (
-                <tr key={d.id} className="border-t border-deepViolet/10">
-                  <td className="p-3 font-mono text-xs">
-                    <Link to={`/documentos/${d.id}`} className="text-cognitiveTeal hover:underline">
-                      {d.codigo}
-                    </Link>
-                  </td>
-                  <td className="p-3"><StateBadge estado={d.estado} /></td>
-                  <td className="p-3 text-xs">{d.creador ? `${d.creador.nombre} ${d.creador.apellido}` : '—'}</td>
-                  <td className="p-3 text-xs">
-                    {d.revisor_pedagogico ? `${d.revisor_pedagogico.nombre} ${d.revisor_pedagogico.apellido}` : '—'}
-                  </td>
-                  <td className="p-3 text-xs">
-                    {d.revisor_estilo ? `${d.revisor_estilo.nombre} ${d.revisor_estilo.apellido}` : '—'}
-                  </td>
-                  <td className="p-3">
-                    <button onClick={() => vaciar(d.id)} className="text-xs font-semibold text-warmAmber-hover hover:underline">
-                      Vaciar
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={d.id}>
+                  <tr className="border-t border-deepViolet/10">
+                    <td className="p-3 font-mono text-xs">
+                      <Link to={`/documentos/${d.id}`} className="text-cognitiveTeal hover:underline">
+                        {d.codigo}
+                      </Link>
+                    </td>
+                    <td className="p-3"><StateBadge estado={d.estado} /></td>
+                    <td className="p-3 text-xs">{d.creador ? `${d.creador.nombre} ${d.creador.apellido}` : '—'}</td>
+                    <td className="p-3 text-xs">
+                      {d.revisor_pedagogico ? `${d.revisor_pedagogico.nombre} ${d.revisor_pedagogico.apellido}` : '—'}
+                    </td>
+                    <td className="p-3 text-xs">
+                      {d.revisor_estilo ? `${d.revisor_estilo.nombre} ${d.revisor_estilo.apellido}` : '—'}
+                    </td>
+                    <td className="p-3 whitespace-nowrap">
+                      {!readOnly && (
+                        <>
+                          <button
+                            onClick={() => (editingId === d.id ? setEditingId(null) : startEdit(d))}
+                            className="text-xs font-semibold text-deepViolet hover:underline mr-3"
+                          >
+                            {editingId === d.id ? 'Cancelar' : 'Editar'}
+                          </button>
+                          <button
+                            onClick={() => vaciar(d.id)}
+                            disabled={!!vaciandoId}
+                            className="text-xs font-semibold text-warmAmber-hover hover:underline mr-3 disabled:opacity-50"
+                          >
+                            Vaciar
+                          </button>
+                          <button
+                            onClick={() => deleteDocument(d)}
+                            className="text-xs font-semibold text-red-600 hover:underline"
+                          >
+                            Eliminar
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                  {editingId === d.id && editValues && (
+                    <tr className="border-t border-deepViolet/10 bg-deepViolet/5">
+                      <td colSpan={6} className="p-4">
+                        <div className="grid sm:grid-cols-4 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">Estado</label>
+                            <select
+                              value={editValues.estado}
+                              onChange={(e) => setEditValues({ ...editValues, estado: e.target.value })}
+                              className="w-full border border-deepViolet/20 rounded-lg p-2 text-sm"
+                            >
+                              {EDITABLE_STATES.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">Creador Experto</label>
+                            <select
+                              value={editValues.creador_id}
+                              onChange={(e) => setEditValues({ ...editValues, creador_id: e.target.value })}
+                              className="w-full border border-deepViolet/20 rounded-lg p-2 text-sm"
+                            >
+                              <option value="">Sin asignar</option>
+                              {usersByRole(projectUsers, 'Creador Experto').map((pu) => (
+                                <option key={pu.profiles.id} value={pu.profiles.id}>
+                                  {pu.profiles.nombre} {pu.profiles.apellido}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">Revisor Pedagógico</label>
+                            <select
+                              value={editValues.revisor_pedagogico_id}
+                              onChange={(e) => setEditValues({ ...editValues, revisor_pedagogico_id: e.target.value })}
+                              className="w-full border border-deepViolet/20 rounded-lg p-2 text-sm"
+                            >
+                              <option value="">Sin asignar</option>
+                              {usersByRole(projectUsers, 'Revisor Pedagógico').map((pu) => (
+                                <option key={pu.profiles.id} value={pu.profiles.id}>
+                                  {pu.profiles.nombre} {pu.profiles.apellido}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">Revisor de Estilo</label>
+                            <select
+                              value={editValues.revisor_estilo_id}
+                              onChange={(e) => setEditValues({ ...editValues, revisor_estilo_id: e.target.value })}
+                              className="w-full border border-deepViolet/20 rounded-lg p-2 text-sm"
+                            >
+                              <option value="">Sin asignar</option>
+                              {usersByRole(projectUsers, 'Revisor de Estilo').map((pu) => (
+                                <option key={pu.profiles.id} value={pu.profiles.id}>
+                                  {pu.profiles.nombre} {pu.profiles.apellido}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <button
+                            onClick={() => saveEdit(d.id)}
+                            className="px-4 py-1.5 rounded-lg bg-deepViolet text-white text-xs font-semibold"
+                          >
+                            Guardar cambios
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               {documents.length === 0 && (
                 <tr>
@@ -224,7 +425,80 @@ export default function ProjectDocumentsTab({ projectId, readOnly }) {
             </tbody>
           </table>
         </div>
+      ) : (
+        <div className="paper-card rounded-xl overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-deepViolet/5 text-left text-xs uppercase text-deepViolet/70">
+              <tr>
+                <th className="p-3">Código</th>
+                <th className="p-3">Creador Experto</th>
+                <th className="p-3">Revisor Pedagógico</th>
+                <th className="p-3">Revisor de Estilo</th>
+                <th className="p-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {trashedDocuments.map((d) => (
+                <tr key={d.id} className="border-t border-deepViolet/10">
+                  <td className="p-3 font-mono text-xs">{d.codigo}</td>
+                  <td className="p-3 text-xs">{d.creador ? `${d.creador.nombre} ${d.creador.apellido}` : '—'}</td>
+                  <td className="p-3 text-xs">
+                    {d.revisor_pedagogico ? `${d.revisor_pedagogico.nombre} ${d.revisor_pedagogico.apellido}` : '—'}
+                  </td>
+                  <td className="p-3 text-xs">
+                    {d.revisor_estilo ? `${d.revisor_estilo.nombre} ${d.revisor_estilo.apellido}` : '—'}
+                  </td>
+                  <td className="p-3 whitespace-nowrap">
+                    {readOnly ? null : restoringId === d.id ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={restoreEstado}
+                          onChange={(e) => setRestoreEstado(e.target.value)}
+                          className="border border-deepViolet/20 rounded-lg p-1.5 text-xs"
+                        >
+                          {EDITABLE_STATES.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => confirmRestore(d.id)}
+                          className="text-xs font-semibold text-cognitiveTeal hover:underline"
+                        >
+                          Confirmar
+                        </button>
+                        <button
+                          onClick={() => setRestoringId(null)}
+                          className="text-xs font-semibold text-slate-400 hover:underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startRestore(d)}
+                        className="text-xs font-semibold text-cognitiveTeal hover:underline"
+                      >
+                        ♻️ Restaurar
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {trashedDocuments.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="p-6 text-center text-slate-400">
+                    La papelera está vacía.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      <ProcessingModal open={!!vaciandoId} message="Vaciando documento... esto puede tardar unos segundos." />
     </div>
   );
 }
