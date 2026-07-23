@@ -8,6 +8,7 @@ import ProjectUsersTab from './project/ProjectUsersTab.jsx';
 import ProjectValidationsTab from './project/ProjectValidationsTab.jsx';
 import ProjectMassChangesTab from './project/ProjectMassChangesTab.jsx';
 import ProjectTemplateTab from './project/ProjectTemplateTab.jsx';
+import ProjectAssignmentTab from './project/ProjectAssignmentTab.jsx';
 
 const TABS = [
   { key: 'formularios', label: 'Formularios' },
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'validaciones', label: 'Validaciones globales' },
   { key: 'cambios-masivos', label: 'Cambios masivos' },
   { key: 'plantilla', label: 'Plantilla y vaciamiento' },
+  { key: 'asignacion', label: 'Reglas de asignación' },
 ];
 
 export default function ProjectDetail() {
@@ -72,6 +74,7 @@ export default function ProjectDetail() {
       {tab === 'validaciones' && <ProjectValidationsTab projectId={id} readOnly={readOnly} />}
       {tab === 'cambios-masivos' && <ProjectMassChangesTab projectId={id} readOnly={readOnly} />}
       {tab === 'plantilla' && <ProjectTemplateTab project={project} onSaved={load} readOnly={readOnly} />}
+      {tab === 'asignacion' && <ProjectAssignmentTab project={project} onSaved={load} readOnly={readOnly} />}
     </div>
   );
 }

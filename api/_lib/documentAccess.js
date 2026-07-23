@@ -11,7 +11,10 @@ export async function loadDocumentWithAccess(auth, documentId) {
   const admin = supabaseAdmin();
   const { data: document, error } = await admin
     .from('documents')
-    .select('*, projects(id, estado, plantilla_texto_simulado, plantilla_tipo, plantilla_url, drive_folder_url)')
+    .select(
+      '*, projects(id, estado, plantilla_texto_simulado, plantilla_tipo, plantilla_url, drive_folder_url, ' +
+        'asignacion_creador, asignacion_revisor_pedagogico, asignacion_revisor_estilo, criterio_carga)'
+    )
     .eq('id', documentId)
     .single();
   if (error || !document) throw new ApiError(404, 'Documento no encontrado');

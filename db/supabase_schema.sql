@@ -173,6 +173,34 @@ alter table public.settings add column if not exists google_oauth_pending_state 
 
 insert into public.settings (id) values (1) on conflict (id) do nothing;
 
+-- ---------------------------------------------------------------------
+-- 9. ASIGNACIÓN GRUPAL POR ROL
+--    Cuando un documento no tiene a nadie asignado en el campo que le
+--    corresponde según su estado (creador_id / revisor_pedagogico_id /
+--    revisor_estilo_id), este modo decide qué pasa: queda disponible para
+--    que cualquiera con ese rol lo tome ('manual'), se asigna solo a quien
+--    tenga menos carga ('carga'), o se asigna al azar ('aleatoria').
+-- ---------------------------------------------------------------------
+alter table public.projects add column if not exists asignacion_creador text not null default 'manual';
+alter table public.projects add column if not exists asignacion_revisor_pedagogico text not null default 'manual';
+alter table public.projects add column if not exists asignacion_revisor_estilo text not null default 'manual';
+-- Qué cuenta como "carga" para el modo 'carga': solo documentos activos
+-- (no Finalizado/Eliminado) o todo el histórico asignado a esa persona.
+alter table public.projects add column if not exists criterio_carga text not null default 'activos';
+
+alter table public.projects drop constraint if exists projects_asignacion_creador_check;
+alter table public.projects add constraint projects_asignacion_creador_check
+  check (asignacion_creador in ('manual','carga','aleatoria'));
+alter table public.projects drop constraint if exists projects_asignacion_revisor_pedagogico_check;
+alter table public.projects add constraint projects_asignacion_revisor_pedagogico_check
+  check (asignacion_revisor_pedagogico in ('manual','carga','aleatoria'));
+alter table public.projects drop constraint if exists projects_asignacion_revisor_estilo_check;
+alter table public.projects add constraint projects_asignacion_revisor_estilo_check
+  check (asignacion_revisor_estilo in ('manual','carga','aleatoria'));
+alter table public.projects drop constraint if exists projects_criterio_carga_check;
+alter table public.projects add constraint projects_criterio_carga_check
+  check (criterio_carga in ('activos','historico'));
+
 -- =====================================================================
 -- Nota sobre RLS: en esta beta el acceso a datos se realiza EXCLUSIVAMENTE
 -- a través de las funciones serverless de Vercel usando la Service Role Key
