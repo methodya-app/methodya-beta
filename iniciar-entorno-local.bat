@@ -100,6 +100,6 @@ echo.
 start "" "http://localhost:5173"
 
 echo Puedes cerrar esta ventana; el backend y el frontend siguen
-echo corriendo en sus propias ventanas (ciérralas para detenerlos).
+echo corriendo en sus propias ventanas (ci??rralas para detenerlos).
 pause
 endlocal

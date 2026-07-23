@@ -394,6 +394,13 @@ export default function DocumentExecute() {
               >
                 Enviar a revisión pedagógica
               </button>
+              <button
+                onClick={() => submitAction('mark_finished')}
+                disabled={saving}
+                className="px-4 py-2 rounded-lg bg-activeMint text-emerald-900 text-sm font-semibold disabled:opacity-50"
+              >
+                ✓ Marcar como terminado
+              </button>
             </>
           )}
 

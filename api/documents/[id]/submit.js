@@ -34,6 +34,11 @@ const ACTIONS = {
     to: 'Devuelto',
     allowedRole: 'isRevisorEstilo',
   },
+  mark_finished: {
+    from: ['Revisión Estilo'],
+    to: 'Finalizado',
+    allowedRole: 'isRevisorEstilo',
+  },
 };
 
 export default withCors(async (req, res) => {

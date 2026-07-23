@@ -5,6 +5,7 @@ import Layout from './components/Layout.jsx';
 
 import Login from './pages/Login.jsx';
 import ProjectsList from './pages/admin/ProjectsList.jsx';
+import Analytics from './pages/admin/Analytics.jsx';
 import ProjectDetail from './pages/admin/ProjectDetail.jsx';
 import FormBuilder from './pages/admin/FormBuilder.jsx';
 import UsersGlobal from './pages/admin/UsersGlobal.jsx';
@@ -31,6 +32,7 @@ export default function App() {
 
         <Route path="/admin/proyectos" element={<ProtectedRoute adminOnly><ProjectsList /></ProtectedRoute>} />
         <Route path="/admin/proyectos/:id" element={<ProtectedRoute adminOnly><ProjectDetail /></ProtectedRoute>} />
+        <Route path="/admin/analitica" element={<ProtectedRoute adminOnly><Analytics /></ProtectedRoute>} />
         <Route path="/admin/formularios/:id" element={<ProtectedRoute adminOnly><FormBuilder /></ProtectedRoute>} />
         <Route path="/admin/usuarios" element={<ProtectedRoute adminOnly><UsersGlobal /></ProtectedRoute>} />
         <Route path="/admin/tipos-documento" element={<ProtectedRoute adminOnly><DocumentTypes /></ProtectedRoute>} />

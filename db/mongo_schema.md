@@ -109,6 +109,17 @@ de Supabase, enlazado por `document_id`).
       "text": "Revisar el término 'sistema'",
       "mentions": ["uuid_usuario_etiquetado"],
       "resolved": false,
+      "replies": [
+        {
+          "id": "uuid",
+          "author_id": "uuid",
+          "author_nombre": "Juan Gómez",
+          "text": "Corregido, ya quedó como 'proceso'",
+          "mentions": ["uuid_del_autor_del_comentario"],
+          "resolves": true,
+          "created_at": ISODate
+        }
+      ],
       "created_at": ISODate
     }
   ],

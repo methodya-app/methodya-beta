@@ -34,6 +34,7 @@ export default function Layout() {
           {isAdmin ? (
             <>
               <NavLink to="/admin/proyectos" className={navLinkClass}>Proyectos</NavLink>
+              <NavLink to="/admin/analitica" className={navLinkClass}>Analítica</NavLink>
               <NavLink to="/admin/usuarios" className={navLinkClass}>Usuarios</NavLink>
               <NavLink to="/admin/tipos-documento" className={navLinkClass}>Tipos de documento</NavLink>
               <NavLink to="/admin/subformularios" className={navLinkClass}>Subformularios</NavLink>

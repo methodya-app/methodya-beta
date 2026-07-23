@@ -17,7 +17,13 @@ export default withCors(async (req, res) => {
   const admin = supabaseAdmin();
 
   if (req.method === 'GET') {
+    // trashed=1 -> solo proyectos en la papelera (estado Eliminado); por
+    // defecto se excluyen (vista normal de proyectos).
+    const trashed = req.query.trashed === '1' || req.query.trashed === 'true';
+    if (trashed) requireAdmin(auth); // la papelera es exclusiva del Administrador
+
     let query = admin.from('projects').select('*').order('created_at', { ascending: false });
+    query = trashed ? query.eq('estado', 'Eliminado') : query.neq('estado', 'Eliminado');
     if (!auth.isAdmin) {
       const projectIds = [...new Set(auth.projectRoles.map((pr) => pr.project_id))];
       if (projectIds.length === 0) return res.status(200).json({ projects: [] });
