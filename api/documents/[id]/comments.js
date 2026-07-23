@@ -19,7 +19,35 @@ export default withCors(async (req, res) => {
   }
 
   if (req.method === 'POST') {
-    const { field_id, text, mentions } = req.body || {};
+    const { field_id, text, mentions, reply_to, resolves } = req.body || {};
+
+    // Respuesta a un comentario existente: se agrega al arreglo `replies`
+    // del comentario y, si `resolves` viene marcado, deja el comentario
+    // padre como resuelto en la misma operación.
+    if (reply_to) {
+      if (!text) throw new ApiError(400, 'text es obligatorio');
+
+      const reply = {
+        id: randomUUID(),
+        author_id: auth.profile.id,
+        author_nombre: `${auth.profile.nombre} ${auth.profile.apellido}`,
+        text,
+        mentions: Array.isArray(mentions) ? mentions : [],
+        resolves: !!resolves,
+        created_at: new Date(),
+      };
+
+      const update = { $push: { 'comments.$.replies': reply } };
+      if (resolves) update.$set = { 'comments.$.resolved': true };
+
+      const result = await db
+        .collection('document_data')
+        .updateOne({ document_id: id, 'comments.id': reply_to }, update);
+      if (result.matchedCount === 0) throw new ApiError(404, 'Comentario no encontrado');
+
+      return res.status(201).json({ reply });
+    }
+
     if (!field_id || !text) throw new ApiError(400, 'field_id y text son obligatorios');
 
     const comment = {
@@ -30,6 +58,7 @@ export default withCors(async (req, res) => {
       text,
       mentions: Array.isArray(mentions) ? mentions : [],
       resolved: false,
+      replies: [],
       created_at: new Date(),
     };
 

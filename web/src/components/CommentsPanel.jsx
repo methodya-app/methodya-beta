@@ -8,6 +8,12 @@ export default function CommentsPanel({ documentId, fieldId, comments, projectUs
   const [mentionId, setMentionId] = useState('');
   const [sending, setSending] = useState(false);
 
+  const [replyingId, setReplyingId] = useState(null);
+  const [replyText, setReplyText] = useState('');
+  const [replyMentions, setReplyMentions] = useState([]);
+  const [replyResolves, setReplyResolves] = useState(false);
+  const [replySending, setReplySending] = useState(false);
+
   const fieldComments = (comments || []).filter((c) => c.field_id === fieldId);
 
   const send = async () => {
@@ -32,6 +38,42 @@ export default function CommentsPanel({ documentId, fieldId, comments, projectUs
     onChange?.();
   };
 
+  const startReply = (c) => {
+    setReplyingId(c.id);
+    setReplyText('');
+    // Por defecto se etiqueta a quien generó el comentario original.
+    setReplyMentions(c.author_id ? [c.author_id] : []);
+    setReplyResolves(false);
+  };
+
+  const cancelReply = () => {
+    setReplyingId(null);
+    setReplyText('');
+    setReplyMentions([]);
+    setReplyResolves(false);
+  };
+
+  const toggleReplyMention = (userId) => {
+    setReplyMentions((cur) => (cur.includes(userId) ? cur.filter((id) => id !== userId) : [...cur, userId]));
+  };
+
+  const sendReply = async (commentId) => {
+    if (!replyText.trim()) return;
+    setReplySending(true);
+    try {
+      await api.post(`/documents/${documentId}/comments`, {
+        reply_to: commentId,
+        text: replyText,
+        mentions: replyMentions,
+        resolves: replyResolves,
+      });
+      cancelReply();
+      onChange?.();
+    } finally {
+      setReplySending(false);
+    }
+  };
+
   if (!canComment && fieldComments.length === 0) return null;
 
   return (
@@ -51,6 +93,76 @@ export default function CommentsPanel({ documentId, fieldId, comments, projectUs
           </div>
           <p className="text-slate-700 mt-0.5">{c.text}</p>
           {c.resolved && <span className="text-emerald-700 font-semibold">Resuelto</span>}
+
+          {(c.replies || []).length > 0 && (
+            <div className="mt-2 ml-3 pl-2 border-l-2 border-deepViolet/15 space-y-1.5">
+              {c.replies.map((r) => (
+                <div key={r.id}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-deepViolet">{r.author_nombre}</span>
+                    {r.resolves && <span className="text-emerald-700 font-semibold text-[10px]">Resolvió el comentario</span>}
+                  </div>
+                  <p className="text-slate-700 mt-0.5">{r.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {replyingId === c.id ? (
+            <div className="mt-2 ml-3 pl-2 border-l-2 border-deepViolet/15 flex flex-col gap-1.5">
+              <textarea
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Escribe una respuesta..."
+                className="w-full border border-deepViolet/20 rounded-md p-1.5 text-xs"
+                rows={2}
+              />
+              {projectUsers?.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {projectUsers.map((u) => (
+                    <label key={u.profiles.id} className="flex items-center gap-1 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={replyMentions.includes(u.profiles.id)}
+                        onChange={() => toggleReplyMention(u.profiles.id)}
+                      />
+                      {u.profiles.nombre} {u.profiles.apellido}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-deepViolet">
+                <input
+                  type="checkbox"
+                  checked={replyResolves}
+                  onChange={(e) => setReplyResolves(e.target.checked)}
+                />
+                Esta respuesta resuelve el comentario
+              </label>
+              <div className="flex gap-2 items-center">
+                <button
+                  onClick={cancelReply}
+                  className="text-[11px] font-semibold text-slate-400 hover:underline"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => sendReply(c.id)}
+                  disabled={replySending}
+                  className="ml-auto px-2.5 py-1 rounded-md bg-deepViolet text-white font-semibold disabled:opacity-50"
+                >
+                  Enviar respuesta
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => startReply(c)}
+              className="mt-1.5 text-[11px] font-semibold text-cognitiveTeal hover:underline"
+            >
+              Responder
+            </button>
+          )}
         </div>
       ))}
 
