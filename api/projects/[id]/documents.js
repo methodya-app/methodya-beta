@@ -1,6 +1,14 @@
 import { withCors, ApiError } from '../../_lib/cors.js';
 import { requireAuth, requireAdmin, roleInProject } from '../../_lib/auth.js';
 import { supabaseAdmin } from '../../_lib/supabaseAdmin.js';
+import { STAGE_ROLE, autoAssignIfNeeded } from '../../_lib/groupAssignment.js';
+
+const DOCUMENT_COLUMNS =
+  'id, codigo, estado, form_id, document_type_id, creador_id, revisor_pedagogico_id, revisor_estilo_id, vaciado_at, created_at, updated_at,' +
+  'creador:creador_id(nombre, apellido, email),' +
+  'revisor_pedagogico:revisor_pedagogico_id(nombre, apellido, email),' +
+  'revisor_estilo:revisor_estilo_id(nombre, apellido, email),' +
+  'document_types(nombre)';
 
 export default withCors(async (req, res) => {
   const auth = await requireAuth(req);
@@ -16,34 +24,56 @@ export default withCors(async (req, res) => {
     const trashed = req.query.trashed === '1' || req.query.trashed === 'true';
     if (trashed) requireAdmin(auth); // la papelera es exclusiva del Administrador
 
-    let query = admin
-      .from('documents')
-      .select(
-        'id, codigo, estado, form_id, document_type_id, creador_id, revisor_pedagogico_id, revisor_estilo_id, vaciado_at, created_at, updated_at,' +
-          'creador:creador_id(nombre, apellido, email),' +
-          'revisor_pedagogico:revisor_pedagogico_id(nombre, apellido, email),' +
-          'revisor_estilo:revisor_estilo_id(nombre, apellido, email),' +
-          'document_types(nombre)'
-      )
-      .eq('project_id', project_id)
-      .order('created_at', { ascending: false });
-
-    query = trashed ? query.eq('estado', 'Eliminado') : query.neq('estado', 'Eliminado');
-
-    // Filtra según el rol: cada perfil solo ve los documentos que le
-    // corresponden por asignación y/o etapa del flujo.
-    if (role === 'Creador Experto') {
-      query = query.eq('creador_id', auth.profile.id);
-    } else if (role === 'Revisor Pedagógico') {
-      query = query.eq('revisor_pedagogico_id', auth.profile.id);
-    } else if (role === 'Revisor de Estilo') {
-      query = query.eq('revisor_estilo_id', auth.profile.id);
+    if (auth.isAdmin) {
+      let query = admin
+        .from('documents')
+        .select(DOCUMENT_COLUMNS)
+        .eq('project_id', project_id)
+        .order('created_at', { ascending: false });
+      query = trashed ? query.eq('estado', 'Eliminado') : query.neq('estado', 'Eliminado');
+      const { data, error } = await query;
+      if (error) throw new ApiError(500, error.message);
+      return res.status(200).json({ documents: data, my_role: role });
     }
-    // Administrador ve todos los documentos del proyecto.
 
-    const { data, error } = await query;
-    if (error) throw new ApiError(500, error.message);
-    return res.status(200).json({ documents: data, my_role: role });
+    // No-admin: se combina, para cada rol que tenga en este proyecto, sus
+    // documentos ya asignados con los que estén SIN asignar en la(s)
+    // etapa(s) de ese rol (disponibles para tomar, ver claim.js).
+    const myRoles = [
+      ...new Set(auth.projectRoles.filter((pr) => pr.project_id === project_id).map((pr) => pr.role)),
+    ];
+
+    const byId = new Map();
+    for (const roleName of myRoles) {
+      const cfg = STAGE_ROLE.find((s) => s.role === roleName);
+      if (!cfg) continue;
+
+      const { data: assigned } = await admin
+        .from('documents')
+        .select(DOCUMENT_COLUMNS)
+        .eq('project_id', project_id)
+        .neq('estado', 'Eliminado')
+        .eq(cfg.field, auth.profile.id);
+      for (const d of assigned || []) {
+        byId.set(d.id, { ...d, assigned_to_me: true, can_claim: false });
+      }
+
+      const { data: claimable } = await admin
+        .from('documents')
+        .select(DOCUMENT_COLUMNS)
+        .eq('project_id', project_id)
+        .neq('estado', 'Eliminado')
+        .in('estado', cfg.estados)
+        .is(cfg.field, null);
+      for (const d of claimable || []) {
+        if (!byId.has(d.id)) byId.set(d.id, { ...d, assigned_to_me: false, can_claim: true });
+      }
+    }
+
+    const documents = [...byId.values()].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    );
+    return res.status(200).json({ documents, my_role: role, my_roles: myRoles });
   }
 
   if (req.method === 'POST') {
@@ -82,6 +112,15 @@ export default withCors(async (req, res) => {
       actor_id: auth.profile.id,
       nota: 'Documento creado',
     });
+
+    // Si se creó sin Creador Experto asignado, según la configuración del
+    // proyecto se asigna solo o queda disponible para que alguien lo tome.
+    const { data: project } = await admin
+      .from('projects')
+      .select('asignacion_creador, asignacion_revisor_pedagogico, asignacion_revisor_estilo, criterio_carga')
+      .eq('id', project_id)
+      .single();
+    await autoAssignIfNeeded(admin, data, project);
 
     return res.status(201).json({ document: data });
   }

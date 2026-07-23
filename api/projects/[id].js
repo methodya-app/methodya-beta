@@ -27,6 +27,10 @@ export default withCors(async (req, res) => {
       'plantilla_url',
       'drive_folder_url',
       'plantilla_texto_simulado',
+      'asignacion_creador',
+      'asignacion_revisor_pedagogico',
+      'asignacion_revisor_estilo',
+      'criterio_carga',
     ];
     const updates = {};
     for (const key of allowed) {

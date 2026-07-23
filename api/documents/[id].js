@@ -3,6 +3,7 @@ import { requireAuth, requireAdmin } from '../_lib/auth.js';
 import { supabaseAdmin } from '../_lib/supabaseAdmin.js';
 import { getDb, toObjectId } from '../_lib/mongo.js';
 import { loadDocumentWithAccess } from '../_lib/documentAccess.js';
+import { autoAssignIfNeeded } from '../_lib/groupAssignment.js';
 
 export default withCors(async (req, res) => {
   const auth = await requireAuth(req);
@@ -49,7 +50,9 @@ export default withCors(async (req, res) => {
 
     const { data: before, error: beforeError } = await admin
       .from('documents')
-      .select('estado')
+      .select(
+        'estado, project_id, projects(asignacion_creador, asignacion_revisor_pedagogico, asignacion_revisor_estilo, criterio_carga)'
+      )
       .eq('id', id)
       .single();
     if (beforeError) throw new ApiError(404, 'Documento no encontrado');
@@ -77,6 +80,12 @@ export default withCors(async (req, res) => {
         nota,
       });
     }
+
+    // El Administrador pudo dejar el documento sin nadie asignado en el
+    // campo de su rol (o mover el estado a una etapa cuyo campo está
+    // vacío); según la configuración del proyecto, se asigna solo o queda
+    // disponible para que alguien lo tome.
+    await autoAssignIfNeeded(admin, data, before.projects);
 
     return res.status(200).json({ document: data });
   }

@@ -2,6 +2,7 @@ import { withCors, ApiError } from '../../_lib/cors.js';
 import { requireAuth } from '../../_lib/auth.js';
 import { supabaseAdmin } from '../../_lib/supabaseAdmin.js';
 import { loadDocumentWithAccess } from '../../_lib/documentAccess.js';
+import { autoAssignIfNeeded } from '../../_lib/groupAssignment.js';
 
 // Matriz de transiciones válidas por acción, según el documento de la beta:
 //  - Creador Experto: [enviar a revisión pedagógica]
@@ -80,6 +81,11 @@ export default withCors(async (req, res) => {
     actor_id: auth.profile.id,
     nota: nota || null,
   });
+
+  // El documento pudo entrar a una etapa (Pendiente, Revisión Pedagógica,
+  // Revisión Estilo, Devuelto) sin nadie asignado en el campo de ese rol;
+  // según la configuración del proyecto, se asigna solo o queda disponible.
+  await autoAssignIfNeeded(admin, data, access.document.projects);
 
   return res.status(200).json({ document: data });
 });
